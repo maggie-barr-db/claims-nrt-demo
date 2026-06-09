@@ -75,15 +75,15 @@ def main():
     write_table(g._cdc(g._claim_details(base, hot), "I", seq_base), a.catalog, a.schema, a.landing_volume, "claim_detail", "seed")
     write_table(g._cdc(g._claim_attribute(base), "I", seq_base), a.catalog, a.schema, a.landing_volume, "claim_attribute", "seed")
     write_table(g._cdc(g._claim_diagnosis(base), "I", seq_base), a.catalog, a.schema, a.landing_volume, "claim_diagnosis", "seed")
-    write_table(g._cdc(g._claim_payment(base, hot), "I", seq_base), a.catalog, a.schema, a.landing_volume, "claim_payment", "seed")
-    write_table(g._cdc(g._claim_audit(base, "SUBMIT"), "I", seq_base), a.catalog, a.schema, a.landing_volume, "claim_audit", "seed")
+    write_table(g._cdc(g._claim_payment(base, hot, 0), "I", seq_base), a.catalog, a.schema, a.landing_volume, "claim_payment", "seed")
+    write_table(g._cdc(g._claim_audit(base, "SUBMIT", 0), "I", seq_base), a.catalog, a.schema, a.landing_volume, "claim_audit", "seed")
 
     # --- control table: high-water claim number + next sequence base ---
     control = f"{a.catalog}.{a.schema}._demo_control"
-    row = [(int(n_headers), int(1_000_000_000_000), 0, datetime.now(timezone.utc))]
+    row = [(int(n_headers), 1, 0, datetime.now(timezone.utc))]  # seq_base = next run index (seed is run 0)
     cols = ["max_claim_n", "seq_base", "run_index", "updated_at"]
     spark.createDataFrame(row, cols).write.mode("overwrite").saveAsTable(control)
-    print(f"Control table {control} initialized: max_claim_n={n_headers:,}, next seq_base=1e12")
+    print(f"Control table {control} initialized: max_claim_n={n_headers:,}, seed run=0, next run seq=1")
     print("Seed complete. Run the pipeline once to establish the historical baseline.")
 
 

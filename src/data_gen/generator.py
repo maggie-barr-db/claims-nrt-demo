@@ -61,17 +61,29 @@ def _pick(rand_col, options):
 def _provider_col(seed, hot_fraction):
     """Assign provider_id; a `hot_fraction` share goes to the single hot provider."""
     rnd = F.rand(seed)
-    random_provider = F.format_string("PRV%06d", (F.rand(seed + 7) * N_PROVIDERS).cast("int"))
+    # +1 so ids land in 1..N_PROVIDERS, matching gen_provider's range(1, N+1);
+    # without it this produced PRV000000 (no such provider) and never PRV<N>.
+    random_provider = F.format_string("PRV%06d", (F.rand(seed + 7) * N_PROVIDERS + 1).cast("int"))
     if hot_fraction <= 0:
         return random_provider
     return F.when(rnd < F.lit(hot_fraction), F.lit(HOT_PROVIDER_ID)).otherwise(random_provider)
 
 
 def _cdc(df, oper, seq_base):
-    """Attach CDC metadata. seq is globally increasing across runs via seq_base."""
+    """Attach CDC metadata. `seq_base` is the run index (0 = seed, then 1, 2, …
+    per increment) and is used directly as `header__change_seq`: every row in a
+    run shares one strictly-increasing sequence. This is correct because each
+    primary key changes at most once per table per run (the new/header-only/
+    adjustment/reversal buckets are disjoint, and new claims get fresh ids), so
+    per-key ordering is fully determined by run order.
+
+    Do NOT reintroduce `monotonically_increasing_id()` here: it encodes the
+    partition id in the high bits (value ~ partition_id * 2**33), which for a
+    high-partition frame can exceed the gap between runs and invert CDC ordering
+    across runs — silently dropping later updates/deletes."""
     return (
         df.withColumn("header__change_oper", F.lit(oper))
-        .withColumn("header__change_seq", F.lit(seq_base) + F.monotonically_increasing_id())
+        .withColumn("header__change_seq", F.lit(seq_base).cast("long"))
         .withColumn("header__change_ts", F.current_timestamp())
     )
 
@@ -180,9 +192,12 @@ def _claim_detail_keys_only(base, lines=DETAIL_LINES_PER_CLAIM):
     return out
 
 
-def _claim_audit(base, event_type):
+def _claim_audit(base, event_type, run_id):
     return base.select(
-        F.format_string("AUD%012d", (F.rand(40) * 1e12).cast("long")).alias("claim_audit_id"),
+        # Deterministic + globally unique per (run, claim): one audit event per
+        # claim per run, distinct across runs (append-style trail). A random id
+        # collided (~n^2/2N) and APPLY CHANGES then silently dropped the dupes.
+        F.format_string("AUD%04d%012d", F.lit(run_id), F.col("n")).alias("claim_audit_id"),
         F.format_string("CLM%012d", F.col("n")).alias("claim_id"),
         F.lit(event_type).alias("event_type"),
         _pick(F.rand(41), ["OK", "PENDED", "REJECTED"]).alias("event_status"),
@@ -192,9 +207,10 @@ def _claim_audit(base, event_type):
     )
 
 
-def _claim_payment(base, hot_fraction):
+def _claim_payment(base, hot_fraction, run_id):
     return base.select(
-        F.format_string("PMT%012d", (F.rand(43) * 1e12).cast("long")).alias("payment_id"),
+        # Deterministic + unique per (run, claim) — see _claim_audit note.
+        F.format_string("PMT%04d%012d", F.lit(run_id), F.col("n")).alias("payment_id"),
         F.format_string("CLM%012d", F.col("n")).alias("claim_id"),
         F.format_string("PAY%05d", (F.rand(44) * N_PAYERS + 1).cast("long")).alias("payer_id"),
         _pick(F.rand(45), ["CHECK", "EFT", "CARD", "SYSTEM"]).alias("payment_method"),

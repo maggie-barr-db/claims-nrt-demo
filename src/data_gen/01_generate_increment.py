@@ -121,15 +121,15 @@ def main():
     out["claim_diagnosis"] += [(g._claim_diagnosis(new_base), "I")]
     # payments on adjustments + reversals
     out["claim_payment"] += [
-        (g._claim_payment(adj_base, hot), "U"),
-        (g._claim_payment(rev_base, hot), "U"),
+        (g._claim_payment(adj_base, hot, run), "U"),
+        (g._claim_payment(rev_base, hot, run), "U"),
     ]
     # audit row for every changed claim
     out["claim_audit"] += [
-        (g._claim_audit(new_base, "SUBMIT"), "I"),
-        (g._claim_audit(hdr_base, "DENY"), "I"),
-        (g._claim_audit(adj_base, "ADJUST"), "I"),
-        (g._claim_audit(rev_base, "REVERSE"), "I"),
+        (g._claim_audit(new_base, "SUBMIT", run), "I"),
+        (g._claim_audit(hdr_base, "DENY", run), "I"),
+        (g._claim_audit(adj_base, "ADJUST", run), "I"),
+        (g._claim_audit(rev_base, "REVERSE", run), "I"),
     ]
 
     for table, parts in out.items():
@@ -157,7 +157,7 @@ def main():
 
     # advance control
     spark.createDataFrame(
-        [(int(max_n + n_new), int(seq_base + 1_000_000_000_000), int(run), datetime.now(timezone.utc))],
+        [(int(max_n + n_new), int(seq_base + 1), int(run), datetime.now(timezone.utc))],
         ["max_claim_n", "seq_base", "run_index", "updated_at"],
     ).write.mode("overwrite").saveAsTable(control)
     print(f"Increment {label} complete. Control advanced: max_claim_n={max_n + n_new:,}, run_index={run}")
