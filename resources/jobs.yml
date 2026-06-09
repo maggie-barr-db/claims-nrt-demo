@@ -1,0 +1,162 @@
+resources:
+  jobs:
+
+    # Run ONCE per workspace after deploy: creates catalog (if permitted), schema, volumes.
+    setup_job:
+      name: "[claims-nrt] 00 UC setup"
+      environments:
+        - environment_key: serverless
+          spec:
+            client: "3"
+      tasks:
+        - task_key: uc_setup
+          environment_key: serverless
+          spark_python_task:
+            python_file: ../src/setup/00_uc_setup.py
+            parameters:
+              - "--catalog=${var.catalog}"
+              - "--schema=${var.schema}"
+              - "--landing_volume=${var.landing_volume}"
+              - "--state_volume=${var.state_volume}"
+
+    # One-time historical seed (run before the demo).
+    seed_history_job:
+      name: "[claims-nrt] 01 seed history"
+      environments:
+        - environment_key: serverless
+          spec:
+            client: "3"
+      parameters:
+        - name: seed_rows
+          default: ${var.seed_rows}
+      tasks:
+        - task_key: seed_history
+          environment_key: serverless
+          spark_python_task:
+            python_file: ../src/data_gen/00_seed_history.py
+            parameters:
+              - "--catalog=${var.catalog}"
+              - "--schema=${var.schema}"
+              - "--landing_volume=${var.landing_volume}"
+              - "--seed_rows={{job.parameters.seed_rows}}"
+              - "--code_root=${workspace.file_path}"
+
+    # Generate one increment. Override --provider_concentration at run time for the skew A/B.
+    generate_increment_job:
+      name: "[claims-nrt] 02 generate increment"
+      environments:
+        - environment_key: serverless
+          spec:
+            client: "3"
+      parameters:
+        - name: provider_concentration
+          default: ${var.provider_concentration}
+        - name: rows_per_increment
+          default: ${var.rows_per_increment}
+        - name: pct_new
+          default: "0.20"
+        - name: pct_header_only
+          default: "0.30"
+        - name: pct_adjustment
+          default: "0.35"
+        - name: pct_reversal
+          default: "0.15"
+      tasks:
+        - task_key: generate_increment
+          environment_key: serverless
+          spark_python_task:
+            python_file: ../src/data_gen/01_generate_increment.py
+            parameters:
+              - "--catalog=${var.catalog}"
+              - "--schema=${var.schema}"
+              - "--landing_volume=${var.landing_volume}"
+              - "--rows_per_increment={{job.parameters.rows_per_increment}}"
+              - "--provider_concentration={{job.parameters.provider_concentration}}"
+              - "--pct_new={{job.parameters.pct_new}}"
+              - "--pct_header_only={{job.parameters.pct_header_only}}"
+              - "--pct_adjustment={{job.parameters.pct_adjustment}}"
+              - "--pct_reversal={{job.parameters.pct_reversal}}"
+              - "--code_root=${workspace.file_path}"
+
+    # Event-driven: fire the pipeline when new parquet lands in the volume.
+    pipeline_file_arrival_trigger_job:
+      name: "[claims-nrt] pipeline on file arrival"
+      trigger:
+        file_arrival:
+          url: /Volumes/${var.catalog}/${var.schema}/${var.landing_volume}/
+      tasks:
+        - task_key: run_pipeline
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.nrt_claims_pipeline.id}
+
+    # ---- Skew showcase A/B: same volume, different provider concentration ----
+    # Each is self-contained (generate increment -> run pipeline) so the run
+    # history + timings are clean to compare side by side in the demo.
+
+    # Providers EVEN — writes spread uniformly across ~5,000 providers.
+    skew_demo_even_job:
+      name: "[claims-nrt] skew demo — providers EVEN (0%)"
+      environments:
+        - environment_key: serverless
+          spec:
+            client: "3"
+      parameters:
+        - name: rows_per_increment
+          default: "5000000"
+        - name: provider_concentration
+          default: "0.0"
+      tasks:
+        - task_key: generate_even
+          environment_key: serverless
+          spark_python_task:
+            python_file: ../src/data_gen/01_generate_increment.py
+            parameters:
+              - "--catalog=${var.catalog}"
+              - "--schema=${var.schema}"
+              - "--landing_volume=${var.landing_volume}"
+              - "--rows_per_increment={{job.parameters.rows_per_increment}}"
+              - "--provider_concentration={{job.parameters.provider_concentration}}"
+              - "--pct_new=0.20"
+              - "--pct_header_only=0.0"
+              - "--pct_adjustment=0.55"
+              - "--pct_reversal=0.25"
+              - "--code_root=${workspace.file_path}"
+        - task_key: process
+          depends_on:
+            - task_key: generate_even
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.nrt_claims_pipeline.id}
+
+    # One provider owns 80% of the writes — the hot-spot stress case.
+    skew_demo_hot_job:
+      name: "[claims-nrt] skew demo — ONE provider 80%"
+      environments:
+        - environment_key: serverless
+          spec:
+            client: "3"
+      parameters:
+        - name: rows_per_increment
+          default: "5000000"
+        - name: provider_concentration
+          default: "0.80"
+      tasks:
+        - task_key: generate_hot
+          environment_key: serverless
+          spark_python_task:
+            python_file: ../src/data_gen/01_generate_increment.py
+            parameters:
+              - "--catalog=${var.catalog}"
+              - "--schema=${var.schema}"
+              - "--landing_volume=${var.landing_volume}"
+              - "--rows_per_increment={{job.parameters.rows_per_increment}}"
+              - "--provider_concentration={{job.parameters.provider_concentration}}"
+              - "--pct_new=0.20"
+              - "--pct_header_only=0.0"
+              - "--pct_adjustment=0.55"
+              - "--pct_reversal=0.25"
+              - "--code_root=${workspace.file_path}"
+        - task_key: process
+          depends_on:
+            - task_key: generate_hot
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.nrt_claims_pipeline.id}

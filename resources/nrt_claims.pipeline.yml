@@ -1,0 +1,23 @@
+resources:
+  pipelines:
+    nrt_claims_pipeline:
+      name: NRT Claims CDC — Bronze + Silver (AUTO CDC)
+      catalog: ${var.catalog}
+      schema: ${var.schema}
+      serverless: true
+      photon: true
+      channel: PREVIEW
+      development: true
+      root_path: ../src/pipeline
+      libraries:
+        - glob:
+            include: ../src/pipeline/bronze.py
+        - glob:
+            include: ../src/pipeline/silver_apply_changes.py
+        - glob:
+            include: ../src/pipeline/gold.py
+      configuration:
+        catalog_use: ${var.catalog}
+        schema_use: ${var.schema}
+        landing_volume_use: ${var.landing_volume}
+        pipeline_state_volume_use: ${var.state_volume}

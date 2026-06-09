@@ -1,0 +1,93 @@
+---
+config:
+  look: handDrawn
+  theme: base
+  themeVariables:
+    fontFamily: "Comic Sans MS, Segoe Print, cursive"
+    fontSize: "17px"
+    lineColor: "#37474F"
+    primaryColor: "#ffffff"
+  flowchart:
+    curve: basis
+    nodeSpacing: 45
+    rankSpacing: 65
+---
+flowchart TB
+
+  %% ===== band 0: access & source =====
+  subgraph TOP[" Access &amp; Source "]
+    direction LR
+    Users(["👥 Users / Analysts"]):::ext
+    API(["⚙️ REST · CLI · SDK"]):::ext
+    QNXT[("QNXT · SQL Server")]:::src
+    QLIK["Qlik Replicate<br/>CDC I/U/D + change_seq"]:::cdc
+    Users ~~~ API ~~~ QNXT
+    QNXT --> QLIK
+  end
+
+  %% ===== band 1: governance plane =====
+  subgraph UC["🛡️ Unity Catalog — one governance layer over every asset below"]
+    direction LR
+    G1["Catalog /<br/>Schema"]:::gov
+    G2["Lineage"]:::gov
+    G3["Tags · RBAC"]:::gov
+    G4["Predictive<br/>Optimization"]:::gov
+    G5["Deletion Vectors ·<br/>Change Data Feed"]:::gov
+    G1 ~~~ G2 ~~~ G3 ~~~ G4 ~~~ G5
+  end
+
+  %% ===== band 2: pipeline / compute plane =====
+  subgraph PIPE["⚡ Lakeflow Declarative Pipeline — serverless + Photon · parallel orchestration"]
+    direction LR
+    LAND["📁 Landing Volume (S3)<br/>/landing/&lt;table&gt;/ parquet"]:::land
+    subgraph BRONZE["L0 Bronze · Auto Loader · append-only · CDF"]
+      direction TB
+      B1[claim]:::bronze
+      B2[claim_detail]:::bronze
+      B3[claim_audit]:::bronze
+      Bn["… 9 tables"]:::bronze
+    end
+    subgraph SILVER["Silver · current-state · APPLY CHANGES · SCD1<br/>liquid-cluster claim_id · deletion vectors"]
+      direction TB
+      S1[claim]:::silver
+      S2[claim_detail]:::silver
+      S3[claim_audit]:::silver
+      Sn["… 9 tables"]:::silver
+    end
+    GOLD["Gold · dimensional model (star)<br/><br/>dims: provider · member · payer ·<br/>date · procedure · diagnosis<br/><br/>facts: fact_claim_line (line) ·<br/>fact_claim (header) · agg_claims_daily<br/><br/>joins · explode · aggregate — not 1:1"]:::gold
+    LAND --> BRONZE
+    B1 --> S1
+    B2 --> S2
+    B3 --> S3
+    Bn --> Sn
+    SILVER --> GOLD
+  end
+
+  %% ===== band 3: consumption plane =====
+  subgraph CONS["Consumption"]
+    direction LR
+    R1["Genie"]:::cons
+    R2["DBSQL"]:::cons
+    R3["AI/BI Dashboards"]:::cons
+    R1 ~~~ R2 ~~~ R3
+  end
+
+  %% ===== force vertical band stacking =====
+  TOP ~~~ UC
+  UC ~~~ PIPE
+  PIPE ~~~ CONS
+
+  %% ===== functional wiring =====
+  QLIK --> LAND
+  LAND -. "file-arrival trigger · no always-on cost" .-> BRONZE
+  GOLD --> CONS
+
+  classDef ext fill:#F1F8E9,stroke:#2E7D32,color:#1B5E20;
+  classDef src fill:#E8EEF7,stroke:#3F5C8C,color:#1A2B45;
+  classDef cdc fill:#FBEFD6,stroke:#C79A3B,color:#3A2E12;
+  classDef land fill:#E7F3EC,stroke:#3C8C5A,color:#143524;
+  classDef bronze fill:#F3E6D8,stroke:#B07C46,color:#3A2812;
+  classDef silver fill:#E6ECF2,stroke:#5E7891,color:#1F2E3D;
+  classDef gold fill:#FBF3D6,stroke:#B8912E,color:#3D2F08;
+  classDef gov fill:#FDEEF4,stroke:#B5547E,color:#4A1530;
+  classDef cons fill:#ECE6F5,stroke:#7A5BB0,color:#241541;

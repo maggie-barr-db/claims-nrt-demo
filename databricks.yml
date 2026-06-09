@@ -1,0 +1,56 @@
+bundle:
+  name: claims-nrt-demo
+
+# ---------------------------------------------------------------------------
+# Near-real-time (NRT) claims CDC demo on Lakeflow Declarative Pipelines.
+#
+# Pattern: change-data-capture parquet (insert/update/delete + sequence) lands
+# in a Unity Catalog Volume, Auto Loader ingests it into append-only bronze,
+# and AUTO CDC / APPLY CHANGES merges it into SCD Type 1 silver tables that are
+# liquid-clustered on the claim key. Designed to run fully serverless.
+#
+# Everything is parameterized via variables below so the bundle can be deployed
+# to any workspace / catalog with a single override (or a new target).
+# ---------------------------------------------------------------------------
+
+variables:
+  catalog:
+    description: >
+      Unity Catalog to deploy into. Specify per workspace at deploy/run time —
+      override with `--var catalog=...` or `export BUNDLE_VAR_catalog=...` so a
+      workspace-specific name never has to live in this file. The setup job
+      creates it if you have CREATE CATALOG; otherwise it must already exist.
+    default: claims_nrt_demo
+  schema:
+    description: Schema that holds the landing volume, bronze, and silver tables.
+    default: claims
+  landing_volume:
+    description: Volume used as the CDC landing zone (ADLS/S3 analog).
+    default: landing
+  state_volume:
+    description: Volume for Auto Loader schema-tracking state.
+    default: pipeline_state
+  warehouse_id:
+    description: Serverless SQL warehouse for ad-hoc validation queries.
+    default: d45b814d06b2bc40
+  # ---- demo knobs (overridable per run) ----
+  rows_per_increment:
+    description: Approx. claim-header changes per generated increment (one ~2hr SLA window).
+    default: "417000"
+  seed_rows:
+    description: Historical claim-detail rows to seed before the demo (merge-pruning depth).
+    default: "100000000"
+  provider_concentration:
+    description: Fraction of an increment's changes attributed to a single hot provider (0.0 = uniform).
+    default: "0.0"
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    mode: development
+    default: true
+    # No workspace host is hardcoded — it comes from the Databricks CLI profile
+    # (`databricks bundle deploy -t dev --profile <your-profile>`) or DATABRICKS_HOST.
+    # catalog defaults to claims_nrt_demo; override via BUNDLE_VAR_catalog / --var.
